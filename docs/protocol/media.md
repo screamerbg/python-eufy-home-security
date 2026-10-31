@@ -21,6 +21,9 @@ async with await station.async_open_live(channel=0) as stream:  # or device_sn=
 
 stream = await station.async_open_recording(storage_path, channel=1)  # ends by itself
 frame = await station.async_trigger_frame(storage_path, channel=1)  # first keyframe
+later = await station.async_trigger_frame(
+    storage_path, channel=1, keyframe_number=3
+)  # third keyframe
 frame = await station.async_event_trigger_frame(event, trailing_frames=8)  # + P-frames
 image = await station.async_preset_image(device_sn, preset=1)  # pan/tilt: turn, settle, keyframe
 ```
@@ -28,8 +31,9 @@ image = await station.async_preset_image(device_sn, preset=1)  # pan/tilt: turn,
 - **Trigger frames use a short-lived session.** `async_trigger_frame` (and
   `async_event_trigger_frame`, and `async_snapshot(recording=...)`) opens a second
   `StationSession` to the same station with the same credential provider, plays the
-  recording (1025) there, takes the first keyframe plus up to `trailing_frames`
-  P-frames (never past the next keyframe), and closes that session in all cases: its
+  recording (1025) there, takes the `keyframe_number`-th keyframe (1-based,
+  default 1) plus up to `trailing_frames` P-frames (never past the next keyframe),
+  and closes that session in all cases: its
   CLOSE stops the station within about 5 ms (below). The station's long-lived session
   is never flooded by the rest of the recording and never waits for it to drain.
   - The short-lived session binds an **ephemeral local port**, also when the station's

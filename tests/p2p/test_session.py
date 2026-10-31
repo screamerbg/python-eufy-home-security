@@ -3216,6 +3216,30 @@ async def test_trigger_frame_plays_on_a_short_lived_session_and_closes_it(
     assert next(o for o in station.received if o["cmd"] == 1025)["mChannel"] == 1
 
 
+async def test_trigger_frame_selects_nth_keyframe_or_last_of_short_clip(
+    station: FakeStation,
+) -> None:
+    """The requested GOP is chosen without opening live media or reading a full clip."""
+    station.recording_frames = MEDIA_GOP * 10
+    session = make_session(station, Provider(station))
+    try:
+        await session.async_get_params()
+        with pytest.raises(ValueError, match="keyframe_number"):
+            await session.async_trigger_frame("/zx/clip.zxvideo", 1, keyframe_number=0)
+        frame = await session.async_trigger_frame("/zx/clip.zxvideo", 1, keyframe_number=3)
+        assert frame == MEDIA_KEYFRAME
+        assert station.media_frames_sent >= MEDIA_GOP * 2 + 1
+        assert station.media_frames_sent < station.recording_frames
+        station.recording_frames = MEDIA_GOP + 2  # only two keyframes
+        assert (
+            await session.async_trigger_frame("/zx/short.zxvideo", 1, keyframe_number=3)
+            == MEDIA_KEYFRAME
+        )
+    finally:
+        await session.async_close()
+    assert all(req["cmd"] != 1003 for req in station.received)
+
+
 async def test_trigger_frames_take_one_short_lived_session_at_a_time_and_always_close_it(
     station: FakeStation,
 ) -> None:
@@ -5385,7 +5409,13 @@ async def test_native_dat_trigger_frame_uses_local_recording_protocol() -> None:
         await session.async_connect()
         picture = await session.async_trigger_frame(LOCAL_RECORDING_PATH, 5)
         assert picture == MEDIA_KEYFRAME
-        assert fake.native_recording_requests == [(1025, 5, LOCAL_RECORDING_PATH)]
+        # Selecting the second keyframe uses the same native .dat playback.
+        second = await session.async_trigger_frame(LOCAL_RECORDING_PATH, 5, keyframe_number=2)
+        assert second == MEDIA_KEYFRAME
+        assert fake.native_recording_requests == [
+            (1025, 5, LOCAL_RECORDING_PATH),
+            (1025, 5, LOCAL_RECORDING_PATH),
+        ]
     finally:
         await session.async_close()
         fake.stop()
