@@ -186,6 +186,7 @@ from ..p2p.station_config_codecs import Schedule
 from ..p2p.storage_info import CMD_STORAGE, StorageInfo, StorageQuery, storage_query
 from ..recordings import RecordingsPage
 from ..station_config import ModeInfo, StationConfig, build_station_config, stored_device_params
+from .activity import StationActivity
 from .alarms import AlarmWaits, StationAlarms
 from .base import _NOT_PAIRED, own_channel
 from .configuration import ConfigRules, StationConfiguration
@@ -1028,6 +1029,7 @@ class Station:
         self._login_country = login_country
         self._log_name = redact_serial(device.device_sn)
         self._bus = EventBus()
+        self._activity = StationActivity(self, self._bus.emit)
         self._ptz = StationPtz(self)
         self._throttle = LogThrottle()
         self._emitted_state: StationState | None = None
@@ -1447,13 +1449,19 @@ class Station:
         state = self.state
         if state is None or state == self._emitted_state:
             return
+        self._activity.observe(state)
         self._emitted_state = state
         self._bus.emit(StationStateChanged(station_sn=self.serial, state=state))
         self._configuration.emit_config_change(state)
 
+    def note_security_event(self, event: SecurityEvent) -> None:
+        """Feed admitted individual detections to the activity observer."""
+        self._activity.on_security_event(event)
+
     async def async_start(self) -> None:
         """Load the model settings, connect, take a baseline parameter dump, and keep the
         session healthy."""
+        self._activity.reopen()
         await self.async_load_settings()
         await self.session.async_start()
 
@@ -1462,6 +1470,7 @@ class Station:
         try:
             await self.session.async_close()
         finally:
+            await self._activity.close()
             for timer in self._alarms.siren_expiry.values():
                 timer.cancel()
             self._alarms.siren_expiry.clear()
